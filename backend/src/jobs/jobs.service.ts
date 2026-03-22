@@ -1,26 +1,38 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreateJobDto } from './dto/create-job.dto';
-import { UpdateJobDto } from './dto/update-job.dto';
+import { Job, JobStatus } from './entities/job.entity';
 
 @Injectable()
 export class JobsService {
-  create(createJobDto: CreateJobDto) {
-    return 'This action adds a new job';
+  constructor(
+    @InjectRepository(Job)
+    private readonly jobsRepository: Repository<Job>,
+  ) {}
+
+  async create(userId: string, createJobDto: CreateJobDto): Promise<Job> {
+    const job = this.jobsRepository.create({
+      title: createJobDto.title,
+      userId,
+      status: JobStatus.CREATED,
+    });
+    return this.jobsRepository.save(job);
   }
 
-  findAll() {
-    return `This action returns all jobs`;
+  async findAllForUser(userId: string): Promise<Job[]> {
+    return this.jobsRepository.find({
+      where: { userId },
+    });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} job`;
-  }
-
-  update(id: number, updateJobDto: UpdateJobDto) {
-    return `This action updates a #${id} job`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} job`;
+  async findOneForUser(userId: string, id: string): Promise<Job> {
+    const job = await this.jobsRepository.findOne({
+      where: { id, userId },
+    });
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+    return job;
   }
 }

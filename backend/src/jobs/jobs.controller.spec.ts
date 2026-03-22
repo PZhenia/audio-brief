@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 
@@ -8,8 +9,20 @@ describe('JobsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [JobsController],
-      providers: [JobsService],
-    }).compile();
+      providers: [
+        {
+          provide: JobsService,
+          useValue: {
+            create: jest.fn(),
+            findAllForUser: jest.fn(),
+            findOneForUser: jest.fn(),
+          },
+        },
+      ],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<JobsController>(JobsController);
   });
