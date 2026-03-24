@@ -1,0 +1,11 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: audio-brief-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: yevheniia
+      RABBITMQ_DEFAULT_PASS: web_2026
+    ports:
+      - "5672:5672"
+      - "15672:15672"
