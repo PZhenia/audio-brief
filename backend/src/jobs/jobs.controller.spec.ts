@@ -16,6 +16,7 @@ describe('JobsController', () => {
             create: jest.fn(),
             findAllForUser: jest.fn(),
             findOneForUser: jest.fn(),
+            update: jest.fn(),
           },
         },
       ],

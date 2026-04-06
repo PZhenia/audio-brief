@@ -1,14 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ClientProxy } from '@nestjs/microservices';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Job } from './entities/job.entity';
 import { JobsService } from './jobs.service';
+import { TranscriptionRmqPublisher } from './transcription-rmq.publisher';
 
 describe('JobsService', () => {
   let service: JobsService;
   let repository: jest.Mocked<Pick<Repository<Job>, 'create' | 'save' | 'find' | 'findOne'>>;
-  let transcriptionClient: jest.Mocked<Pick<ClientProxy, 'emit'>>;
+  let publisher: jest.Mocked<Pick<TranscriptionRmqPublisher, 'publishJobQueued'>>;
 
   beforeEach(async () => {
     repository = {
@@ -17,8 +17,8 @@ describe('JobsService', () => {
       find: jest.fn(),
       findOne: jest.fn(),
     };
-    transcriptionClient = {
-      emit: jest.fn(),
+    publisher = {
+      publishJobQueued: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -29,8 +29,8 @@ describe('JobsService', () => {
           useValue: repository,
         },
         {
-          provide: 'TRANSCRIPTION_SERVICE',
-          useValue: transcriptionClient,
+          provide: TranscriptionRmqPublisher,
+          useValue: publisher,
         },
       ],
     }).compile();
