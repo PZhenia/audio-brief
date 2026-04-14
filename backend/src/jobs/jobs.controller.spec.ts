@@ -5,19 +5,27 @@ import { JobsService } from './jobs.service';
 
 describe('JobsController', () => {
   let controller: JobsController;
+  let jobsService: {
+    create: jest.Mock;
+    findAllForUser: jest.Mock;
+    findOneForUser: jest.Mock;
+    update: jest.Mock;
+  };
 
   beforeEach(async () => {
+    jobsService = {
+      create: jest.fn(),
+      findAllForUser: jest.fn(),
+      findOneForUser: jest.fn(),
+      update: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [JobsController],
       providers: [
         {
           provide: JobsService,
-          useValue: {
-            create: jest.fn(),
-            findAllForUser: jest.fn(),
-            findOneForUser: jest.fn(),
-            update: jest.fn(),
-          },
+          useValue: jobsService,
         },
       ],
     })
@@ -30,5 +38,33 @@ describe('JobsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  it('delegates create to service with userId and dto', () => {
+    const dto = { title: 'Record meeting' };
+    controller.create('user-1', dto);
+    expect(jobsService.create).toHaveBeenCalledWith('user-1', dto);
+  });
+
+  it('delegates findAll to service', () => {
+    controller.findAll('user-1');
+    expect(jobsService.findAllForUser).toHaveBeenCalledWith('user-1');
+  });
+
+  it('delegates findOne to service', () => {
+    controller.findOne('user-1', '9b4f10b7-7d4f-4025-a97f-6189fa2a7ee0');
+    expect(jobsService.findOneForUser).toHaveBeenCalledWith(
+      'user-1',
+      '9b4f10b7-7d4f-4025-a97f-6189fa2a7ee0',
+    );
+  });
+
+  it('delegates update to service', () => {
+    const dto = { summary: 'Done' };
+    controller.update('9b4f10b7-7d4f-4025-a97f-6189fa2a7ee0', dto);
+    expect(jobsService.update).toHaveBeenCalledWith(
+      '9b4f10b7-7d4f-4025-a97f-6189fa2a7ee0',
+      dto,
+    );
   });
 });
