@@ -3,9 +3,11 @@ import logging
 import os
 from pathlib import Path
 
+import boto3
 import pika
 import requests
 import whisper
+from botocore.exceptions import ClientError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,8 +16,14 @@ RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "localhost")
 RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "yevheniia")
 RABBITMQ_PASS = os.environ.get("RABBITMQ_PASS", "web_2026")
 QUEUE_NAME = os.environ.get("RABBITMQ_QUEUE", "transcription_requests")
+RESULTS_QUEUE = os.environ.get("RABBITMQ_RESULTS_QUEUE", "transcription_results")
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:3000").rstrip("/")
+
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "yevheniia")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "web_2026")
+S3_BUCKET = os.environ.get("MINIO_BUCKET", "transcriptions")
 
 
 def parse_payload(body: bytes) -> dict:
@@ -48,9 +56,60 @@ def resolve_audio_path() -> Path | None:
     return stub if stub.is_file() else None
 
 
+def get_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+        region_name=os.environ.get("MINIO_REGION", "us-east-1"),
+    )
+
+
+def ensure_bucket(client) -> None:
+    try:
+        client.head_bucket(Bucket=S3_BUCKET)
+    except ClientError:
+        logger.info("Creating bucket %r", S3_BUCKET)
+        client.create_bucket(Bucket=S3_BUCKET)
+
+
+def upload_transcript_text(client, job_id: str, text: str) -> str:
+    s3_key = f"{job_id}.txt"
+    body = text.encode("utf-8")
+    client.put_object(
+        Bucket=S3_BUCKET,
+        Key=s3_key,
+        Body=body,
+        ContentType="text/plain; charset=utf-8",
+    )
+    return s3_key
+
+
+def publish_transcription_result(ch, job_id: str, s3_key: str) -> None:
+    envelope = {
+        "pattern": RESULTS_QUEUE,
+        "data": {"jobId": job_id, "s3Key": s3_key},
+    }
+    body = json.dumps(envelope).encode("utf-8")
+    ch.queue_declare(queue=RESULTS_QUEUE, durable=True)
+    ch.basic_publish(
+        exchange="",
+        routing_key=RESULTS_QUEUE,
+        body=body,
+        properties=pika.BasicProperties(
+            content_type="application/json",
+            delivery_mode=2,
+        ),
+    )
+
+
 def main() -> None:
     logger.info("Loading Whisper (base) on CUDA…")
     model = whisper.load_model("base", device="cuda")
+
+    s3 = get_s3_client()
+    ensure_bucket(s3)
 
     credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
     parameters = pika.ConnectionParameters(
@@ -62,7 +121,7 @@ def main() -> None:
     channel.queue_declare(queue=QUEUE_NAME, durable=True)
     channel.basic_qos(prefetch_count=1)
 
-    def on_message(ch, method, properties, body): 
+    def on_message(ch, method, properties, body):
         logger.info("Received message from queue (%s bytes)", len(body))
         try:
             data = parse_payload(body)
@@ -84,7 +143,9 @@ def main() -> None:
                     "or add worker/stub.mp3 for local tests."
                 )
 
-            patch_job(job_id, {"status": "DONE", "resultText": text})
+            s3_key = upload_transcript_text(s3, job_id, text)
+            logger.info("Uploaded transcript to MinIO s3://%s/%s", S3_BUCKET, s3_key)
+            publish_transcription_result(ch, job_id, s3_key)
             ch.basic_ack(delivery_tag=method.delivery_tag)
         except Exception:
             logger.exception("Job processing failed")

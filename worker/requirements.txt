@@ -1,3 +1,4 @@
 pika
 requests
 openai-whisper
+boto3

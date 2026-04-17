@@ -6,6 +6,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -28,6 +29,17 @@ export class JobsController {
   @UseGuards(JwtAuthGuard)
   findAll(@UserId() userId: string) {
     return this.jobsService.findAllForUser(userId);
+  }
+
+  @Get(':id/result')
+  @UseGuards(JwtAuthGuard)
+  getResult(
+    @UserId() userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('inline') inline?: string,
+  ) {
+    const inlineText = inline === 'true' || inline === '1';
+    return this.jobsService.getResultForUser(userId, id, inlineText);
   }
 
   @Get(':id')

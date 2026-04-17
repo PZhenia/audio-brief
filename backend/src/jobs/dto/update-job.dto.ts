@@ -12,5 +12,9 @@ export class UpdateJobDto {
 
   @IsOptional()
   @IsString()
+  s3Key?: string;
+
+  @IsOptional()
+  @IsString()
   summary?: string;
 }

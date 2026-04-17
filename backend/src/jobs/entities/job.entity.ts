@@ -27,6 +27,9 @@ export class Job {
   resultText: string | null;
 
   @Column({ type: 'text', nullable: true })
+  s3Key: string | null;
+
+  @Column({ type: 'text', nullable: true })
   summary: string | null;
 
   @Column({
