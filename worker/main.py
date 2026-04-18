@@ -17,6 +17,7 @@ RABBITMQ_USER = os.environ.get("RABBITMQ_USER", "yevheniia")
 RABBITMQ_PASS = os.environ.get("RABBITMQ_PASS", "web_2026")
 QUEUE_NAME = os.environ.get("RABBITMQ_QUEUE", "transcription_requests")
 RESULTS_QUEUE = os.environ.get("RABBITMQ_RESULTS_QUEUE", "transcription_results")
+PROGRESS_QUEUE = os.environ.get("RABBITMQ_PROGRESS_QUEUE", "transcription_progress")
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:3000").rstrip("/")
 
@@ -86,6 +87,35 @@ def upload_transcript_text(client, job_id: str, text: str) -> str:
     return s3_key
 
 
+def publish_progress(
+    ch,
+    user_id: str,
+    job_id: str,
+    progress: int,
+    status: str = "PROCESSING",
+) -> None:
+    envelope = {
+        "pattern": PROGRESS_QUEUE,
+        "data": {
+            "userId": user_id,
+            "jobId": job_id,
+            "status": status,
+            "progress": progress,
+        },
+    }
+    body = json.dumps(envelope).encode("utf-8")
+    ch.queue_declare(queue=PROGRESS_QUEUE, durable=True)
+    ch.basic_publish(
+        exchange="",
+        routing_key=PROGRESS_QUEUE,
+        body=body,
+        properties=pika.BasicProperties(
+            content_type="application/json",
+            delivery_mode=2,
+        ),
+    )
+
+
 def publish_transcription_result(ch, job_id: str, s3_key: str) -> None:
     envelope = {
         "pattern": RESULTS_QUEUE,
@@ -132,6 +162,11 @@ def main() -> None:
                 return
 
             patch_job(job_id, {"status": "PROCESSING"})
+
+            user_id = data.get("userId")
+            if user_id:
+                publish_progress(ch, user_id, job_id, 50, "PROCESSING")
+                logger.info("Published progress 50%% for job %s", job_id)
 
             audio = resolve_audio_path()
             if audio is not None:

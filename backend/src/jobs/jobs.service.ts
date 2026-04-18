@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { CreateJobDto } from './dto/create-job.dto';
 import { UpdateJobDto } from './dto/update-job.dto';
 import { Job, JobStatus } from './entities/job.entity';
+import { EventsGateway } from '../events/events.gateway';
 import { MinioStorageService } from './minio-storage.service';
 import { TranscriptionRmqPublisher } from './transcription-rmq.publisher';
 
@@ -19,6 +20,7 @@ export class JobsService {
     private readonly jobsRepository: Repository<Job>,
     private readonly transcriptionPublisher: TranscriptionRmqPublisher,
     private readonly minioStorage: MinioStorageService,
+    private readonly eventsGateway: EventsGateway,
   ) {}
 
   async create(userId: string, createJobDto: CreateJobDto): Promise<Job> {
@@ -78,6 +80,11 @@ export class JobsService {
     job.status = JobStatus.DONE;
     job.resultText = null;
     await this.jobsRepository.save(job);
+    this.eventsGateway.emitStatusUpdate(job.userId, {
+      jobId: job.id,
+      status: job.status,
+      s3Key: job.s3Key,
+    });
   }
 
   async getResultForUser(

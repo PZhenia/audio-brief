@@ -5,14 +5,18 @@ import {
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { EventsGateway } from '../events/events.gateway';
 import { Job, JobStatus } from './entities/job.entity';
 import { JobsService } from './jobs.service';
+import { MinioStorageService } from './minio-storage.service';
 import { TranscriptionRmqPublisher } from './transcription-rmq.publisher';
 
 describe('JobsService', () => {
   let service: JobsService;
   let repository: jest.Mocked<Pick<Repository<Job>, 'create' | 'save' | 'find' | 'findOne'>>;
   let publisher: jest.Mocked<Pick<TranscriptionRmqPublisher, 'publishJobQueued'>>;
+  let minio: jest.Mocked<Pick<MinioStorageService, 'getPresignedGetUrl' | 'getObjectText'>>;
+  let events: jest.Mocked<Pick<EventsGateway, 'emitStatusUpdate'>>;
 
   beforeEach(async () => {
     repository = {
@@ -23,6 +27,13 @@ describe('JobsService', () => {
     };
     publisher = {
       publishJobQueued: jest.fn().mockResolvedValue(undefined),
+    };
+    minio = {
+      getPresignedGetUrl: jest.fn().mockResolvedValue('https://minio/presigned'),
+      getObjectText: jest.fn().mockResolvedValue('text'),
+    };
+    events = {
+      emitStatusUpdate: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -35,6 +46,14 @@ describe('JobsService', () => {
         {
           provide: TranscriptionRmqPublisher,
           useValue: publisher,
+        },
+        {
+          provide: MinioStorageService,
+          useValue: minio,
+        },
+        {
+          provide: EventsGateway,
+          useValue: events,
         },
       ],
     }).compile();
@@ -53,6 +72,7 @@ describe('JobsService', () => {
       userId: 'user-1',
       status: JobStatus.CREATED,
       resultText: null,
+      s3Key: null,
       summary: null,
     };
     const queued: Job = { ...created, status: JobStatus.QUEUED };
@@ -81,6 +101,7 @@ describe('JobsService', () => {
       userId: 'user-1',
       status: JobStatus.CREATED,
       resultText: null,
+      s3Key: null,
       summary: null,
     };
     repository.create.mockReturnValue(created);
@@ -101,6 +122,7 @@ describe('JobsService', () => {
         userId: 'user-1',
         status: JobStatus.DONE,
         resultText: 'text',
+        s3Key: null,
         summary: 'sum',
       },
     ];
@@ -119,6 +141,7 @@ describe('JobsService', () => {
       userId: 'user-1',
       status: JobStatus.PROCESSING,
       resultText: null,
+      s3Key: null,
       summary: null,
     };
     repository.findOne.mockResolvedValue(job);
@@ -145,12 +168,14 @@ describe('JobsService', () => {
       userId: 'user-1',
       status: JobStatus.PROCESSING,
       resultText: null,
+      s3Key: null,
       summary: null,
     };
     const updated: Job = {
       ...existing,
       status: JobStatus.DONE,
       resultText: 'hello',
+      s3Key: null,
       summary: 'short',
     };
     repository.findOne.mockResolvedValue(existing);
@@ -171,5 +196,32 @@ describe('JobsService', () => {
     await expect(service.update('missing', { status: JobStatus.ERROR })).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('applyTranscriptionResultFromQueue saves and emits status_update', async () => {
+    const existing: Job = {
+      id: 'job-1',
+      title: 'A',
+      userId: 'user-1',
+      status: JobStatus.PROCESSING,
+      resultText: 'old',
+      s3Key: null,
+      summary: null,
+    };
+    repository.findOne.mockResolvedValue(existing);
+    repository.save.mockImplementation(async (j: Job) => j);
+
+    await service.applyTranscriptionResultFromQueue({
+      jobId: 'job-1',
+      s3Key: 'job-1.txt',
+    });
+
+    expect(existing.status).toBe(JobStatus.DONE);
+    expect(existing.s3Key).toBe('job-1.txt');
+    expect(events.emitStatusUpdate).toHaveBeenCalledWith('user-1', {
+      jobId: 'job-1',
+      status: JobStatus.DONE,
+      s3Key: 'job-1.txt',
+    });
   });
 });

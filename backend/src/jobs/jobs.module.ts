@@ -1,16 +1,22 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { EventsModule } from '../events/events.module';
 import { Job } from './entities/job.entity';
 import { JobsController } from './jobs.controller';
 import { JobsService } from './jobs.service';
 import { MinioStorageService } from './minio-storage.service';
+import { TranscriptionProgressConsumer } from './transcription-progress.consumer';
 import { TranscriptionResultsConsumer } from './transcription-results.consumer';
 import { TranscriptionRmqPublisher } from './transcription-rmq.publisher';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Job]), AuthModule],
-  controllers: [JobsController, TranscriptionResultsConsumer],
+  imports: [TypeOrmModule.forFeature([Job]), AuthModule, EventsModule],
+  controllers: [
+    JobsController,
+    TranscriptionResultsConsumer,
+    TranscriptionProgressConsumer,
+  ],
   providers: [JobsService, TranscriptionRmqPublisher, MinioStorageService],
 })
 export class JobsModule {}
