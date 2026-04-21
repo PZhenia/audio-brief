@@ -4,7 +4,6 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
-  Patch,
   Post,
   Query,
   UseGuards,
@@ -12,7 +11,6 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserId } from '../auth/decorators/user-id.decorator';
 import { CreateJobDto } from './dto/create-job.dto';
-import { UpdateJobDto } from './dto/update-job.dto';
 import { JobsService } from './jobs.service';
 
 @Controller('jobs')
@@ -44,18 +42,7 @@ export class JobsController {
 
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  findOne(
-    @UserId() userId: string,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
+  findOne(@UserId() userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.jobsService.findOneForUser(userId, id);
-  }
-
-  @Patch(':id')
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() updateJobDto: UpdateJobDto,
-  ) {
-    return this.jobsService.update(id, updateJobDto);
   }
 }

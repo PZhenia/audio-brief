@@ -5,7 +5,6 @@ from pathlib import Path
 
 import boto3
 import pika
-import requests
 import whisper
 from botocore.exceptions import ClientError
 
@@ -18,9 +17,6 @@ RABBITMQ_PASS = os.environ.get("RABBITMQ_PASS", "web_2026")
 QUEUE_NAME = os.environ.get("RABBITMQ_QUEUE", "transcription_requests")
 RESULTS_QUEUE = os.environ.get("RABBITMQ_RESULTS_QUEUE", "transcription_results")
 PROGRESS_QUEUE = os.environ.get("RABBITMQ_PROGRESS_QUEUE", "transcription_progress")
-
-BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:3000").rstrip("/")
-
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://localhost:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "yevheniia")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "web_2026")
@@ -40,12 +36,6 @@ def parse_payload(body: bytes) -> dict:
             )
         return obj["data"]
     return obj
-
-
-def patch_job(job_id: str, payload: dict) -> None:
-    url = f"{BACKEND_URL}/jobs/{job_id}"
-    response = requests.patch(url, json=payload, timeout=60)
-    response.raise_for_status()
 
 
 def resolve_audio_path() -> Path | None:
@@ -89,7 +79,7 @@ def upload_transcript_text(client, job_id: str, text: str) -> str:
 
 def publish_progress(
     ch,
-    user_id: str,
+    user_id: str | None,
     job_id: str,
     progress: int,
     status: str = "PROCESSING",
@@ -97,12 +87,13 @@ def publish_progress(
     envelope = {
         "pattern": PROGRESS_QUEUE,
         "data": {
-            "userId": user_id,
             "jobId": job_id,
             "status": status,
             "progress": progress,
         },
     }
+    if user_id:
+        envelope["data"]["userId"] = user_id
     body = json.dumps(envelope).encode("utf-8")
     ch.queue_declare(queue=PROGRESS_QUEUE, durable=True)
     ch.basic_publish(
@@ -119,7 +110,29 @@ def publish_progress(
 def publish_transcription_result(ch, job_id: str, s3_key: str) -> None:
     envelope = {
         "pattern": RESULTS_QUEUE,
-        "data": {"jobId": job_id, "s3Key": s3_key},
+        "data": {"jobId": job_id, "status": "DONE", "s3Key": s3_key},
+    }
+    body = json.dumps(envelope).encode("utf-8")
+    ch.queue_declare(queue=RESULTS_QUEUE, durable=True)
+    ch.basic_publish(
+        exchange="",
+        routing_key=RESULTS_QUEUE,
+        body=body,
+        properties=pika.BasicProperties(
+            content_type="application/json",
+            delivery_mode=2,
+        ),
+    )
+
+
+def publish_transcription_failure(ch, job_id: str, error_message: str) -> None:
+    envelope = {
+        "pattern": RESULTS_QUEUE,
+        "data": {
+            "jobId": job_id,
+            "status": "ERROR",
+            "error": error_message,
+        },
     }
     body = json.dumps(envelope).encode("utf-8")
     ch.queue_declare(queue=RESULTS_QUEUE, durable=True)
@@ -161,26 +174,37 @@ def main() -> None:
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                 return
 
-            patch_job(job_id, {"status": "PROCESSING"})
-
             user_id = data.get("userId")
-            if user_id:
-                publish_progress(ch, user_id, job_id, 50, "PROCESSING")
-                logger.info("Published progress 50%% for job %s", job_id)
+            publish_progress(ch, user_id, job_id, 0, "PROCESSING")
+            logger.info("Published PROCESSING for job %s", job_id)
 
-            audio = resolve_audio_path()
-            if audio is not None:
-                result = model.transcribe(str(audio))
-                text = (result.get("text") or "").strip()
-            else:
-                text = (
-                    "[stub] No audio file: set TRANSCRIBE_AUDIO_PATH to a valid .mp3 "
-                    "or add worker/stub.mp3 for local tests."
-                )
+            try:
+                audio = resolve_audio_path()
+                if audio is not None:
+                    result = model.transcribe(str(audio))
+                    text = (result.get("text") or "").strip()
+                else:
+                    text = (
+                        "[stub] No audio file: set TRANSCRIBE_AUDIO_PATH to a valid .mp3 "
+                        "or add worker/stub.mp3 for local tests."
+                    )
+            except Exception as exc:
+                logger.exception("Transcription failed for job %s", job_id)
+                publish_transcription_failure(ch, job_id, str(exc))
+                if user_id:
+                    publish_progress(ch, user_id, job_id, 100, "ERROR")
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
+            if user_id:
+                publish_progress(ch, user_id, job_id, 70, "PROCESSING")
+                logger.info("Published progress 70%% for job %s", job_id)
 
             s3_key = upload_transcript_text(s3, job_id, text)
             logger.info("Uploaded transcript to MinIO s3://%s/%s", S3_BUCKET, s3_key)
             publish_transcription_result(ch, job_id, s3_key)
+            if user_id:
+                publish_progress(ch, user_id, job_id, 100, "DONE")
             ch.basic_ack(delivery_tag=method.delivery_tag)
         except Exception:
             logger.exception("Job processing failed")

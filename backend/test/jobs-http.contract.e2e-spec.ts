@@ -4,7 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import request from 'supertest';
 import { Repository } from 'typeorm';
 import { AppModule } from '../src/app.module';
-import { Job, JobStatus } from '../src/jobs/entities/job.entity';
+import { Job } from '../src/jobs/entities/job.entity';
 import { TranscriptionRmqPublisher } from '../src/jobs/transcription-rmq.publisher';
 
 describe('Jobs HTTP contract (e2e)', () => {
@@ -41,7 +41,7 @@ describe('Jobs HTTP contract (e2e)', () => {
     await app.close();
   });
 
-  it('PATCH /jobs/:id contract used by worker', async () => {
+  it('rejects PATCH /jobs/:id because update endpoint is removed', async () => {
     const loginResponse = await request(app.getHttpServer())
       .get('/auth/login/worker-test-user')
       .expect(200);
@@ -54,50 +54,42 @@ describe('Jobs HTTP contract (e2e)', () => {
       .expect(201);
     const createdId = createResponse.body.id as string;
 
-    const payload = {
-      status: JobStatus.DONE,
-      resultText: 'Transcribed text',
-      summary: 'Short summary',
-    };
-
-    const response = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .patch(`/jobs/${createdId}`)
-      .send(payload)
-      .expect(200);
-
-    expect(response.body).toEqual(
-      expect.objectContaining({
-        id: createdId,
-        title: 'contract target',
-        userId: 'worker-test-user',
-        status: JobStatus.DONE,
-        resultText: 'Transcribed text',
-        summary: 'Short summary',
-      }),
-    );
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'DONE' })
+      .expect(404);
   });
 
-  it('PATCH /jobs/:id rejects invalid status enum values', async () => {
+  it('PATCH /jobs/:id returns 404 for existing jobs', async () => {
     const created = await jobsRepository.save({
       title: 'enum check',
       userId: 'worker-test-user',
-      status: JobStatus.PROCESSING,
-      resultText: null,
+      status: 'PROCESSING' as Job['status'],
       summary: null,
     });
+    const loginResponse = await request(app.getHttpServer())
+      .get('/auth/login/worker-test-user')
+      .expect(200);
+    const token = loginResponse.body.access_token as string;
 
     await request(app.getHttpServer())
       .patch(`/jobs/${created.id}`)
-      .send({
-        status: 'FINISHED',
-      })
-      .expect(400);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'FINISHED' })
+      .expect(404);
   });
 
   it('PATCH /jobs/:id returns 404 for missing jobs', async () => {
+    const loginResponse = await request(app.getHttpServer())
+      .get('/auth/login/worker-test-user')
+      .expect(200);
+    const token = loginResponse.body.access_token as string;
+
     await request(app.getHttpServer())
       .patch('/jobs/7cb39e8a-77bb-4214-a843-5e3fdb4c8953')
-      .send({ status: JobStatus.ERROR })
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'ERROR' })
       .expect(404);
   });
 });

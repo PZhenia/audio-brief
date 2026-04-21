@@ -8,7 +8,13 @@ export class TranscriptionResultsConsumer {
 
   @EventPattern('transcription_results')
   async handleCompleted(
-    @Payload() data: { jobId: string; s3Key: string },
+    @Payload()
+    data: {
+      jobId: string;
+      status?: string;
+      s3Key?: string;
+      error?: string;
+    },
   ): Promise<void> {
     await this.jobsService.applyTranscriptionResultFromQueue(data);
   }

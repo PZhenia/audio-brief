@@ -31,7 +31,9 @@ export class EventsGateway implements OnGatewayConnection {
   async handleConnection(client: Socket): Promise<void> {
     const token = this.extractToken(client);
     if (!token) {
-      this.logger.warn(`WebSocket ${client.id}: missing token (use ?token= or Authorization: Bearer)`);
+      this.logger.warn(
+        `WebSocket ${client.id}: missing token (use ?token= or Authorization: Bearer)`,
+      );
       client.disconnect();
       return;
     }

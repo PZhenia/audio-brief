@@ -1,25 +1,21 @@
 import { Controller } from '@nestjs/common';
 import { EventPattern, Payload } from '@nestjs/microservices';
-import { EventsGateway } from '../events/events.gateway';
+import { JobsService } from './jobs.service';
 
 @Controller()
 export class TranscriptionProgressConsumer {
-  constructor(private readonly eventsGateway: EventsGateway) {}
+  constructor(private readonly jobsService: JobsService) {}
 
   @EventPattern('transcription_progress')
-  handleProgress(
+  async handleProgress(
     @Payload()
     data: {
-      userId: string;
+      userId?: string;
       jobId: string;
       status: string;
       progress?: number;
     },
-  ): void {
-    this.eventsGateway.emitStatusUpdate(data.userId, {
-      jobId: data.jobId,
-      status: data.status,
-      progress: data.progress,
-    });
+  ): Promise<void> {
+    await this.jobsService.applyTranscriptionProgressFromQueue(data);
   }
 }

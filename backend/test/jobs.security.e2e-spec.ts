@@ -103,7 +103,6 @@ describe('Jobs security (e2e)', () => {
       title: 'owned',
       userId: 'user-1',
       status: JobStatus.CREATED,
-      resultText: null,
       summary: null,
     });
 

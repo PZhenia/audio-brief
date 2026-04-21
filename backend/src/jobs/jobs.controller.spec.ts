@@ -9,7 +9,6 @@ describe('JobsController', () => {
     create: jest.Mock;
     findAllForUser: jest.Mock;
     findOneForUser: jest.Mock;
-    update: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -17,7 +16,6 @@ describe('JobsController', () => {
       create: jest.fn(),
       findAllForUser: jest.fn(),
       findOneForUser: jest.fn(),
-      update: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -59,12 +57,4 @@ describe('JobsController', () => {
     );
   });
 
-  it('delegates update to service', () => {
-    const dto = { summary: 'Done' };
-    controller.update('9b4f10b7-7d4f-4025-a97f-6189fa2a7ee0', dto);
-    expect(jobsService.update).toHaveBeenCalledWith(
-      '9b4f10b7-7d4f-4025-a97f-6189fa2a7ee0',
-      dto,
-    );
-  });
 });

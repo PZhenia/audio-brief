@@ -1,8 +1,4 @@
-import {
-  Column,
-  Entity,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 export enum JobStatus {
   CREATED = 'CREATED',
@@ -22,9 +18,6 @@ export class Job {
 
   @Column({ type: 'text' })
   userId: string;
-
-  @Column({ type: 'text', nullable: true })
-  resultText: string | null;
 
   @Column({ type: 'text', nullable: true })
   s3Key: string | null;

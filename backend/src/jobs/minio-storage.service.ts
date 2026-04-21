@@ -30,7 +30,10 @@ export class MinioStorageService {
     return (await out.Body?.transformToString()) ?? '';
   }
 
-  async getPresignedGetUrl(key: string, expiresInSeconds = 3600): Promise<string> {
+  async getPresignedGetUrl(
+    key: string,
+    expiresInSeconds = 3600,
+  ): Promise<string> {
     const cmd = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     return getSignedUrl(this.client, cmd, { expiresIn: expiresInSeconds });
   }

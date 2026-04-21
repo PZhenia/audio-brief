@@ -1,13 +1,13 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateJobDto } from './dto/create-job.dto';
-import { UpdateJobDto } from './dto/update-job.dto';
 import { Job, JobStatus } from './entities/job.entity';
 import { EventsGateway } from '../events/events.gateway';
 import { MinioStorageService } from './minio-storage.service';
@@ -15,6 +15,8 @@ import { TranscriptionRmqPublisher } from './transcription-rmq.publisher';
 
 @Injectable()
 export class JobsService {
+  private readonly logger = new Logger(JobsService.name);
+
   constructor(
     @InjectRepository(Job)
     private readonly jobsRepository: Repository<Job>,
@@ -68,7 +70,9 @@ export class JobsService {
    */
   async applyTranscriptionResultFromQueue(payload: {
     jobId: string;
-    s3Key: string;
+    status?: string;
+    s3Key?: string;
+    error?: string;
   }): Promise<void> {
     const job = await this.jobsRepository.findOne({
       where: { id: payload.jobId },
@@ -76,14 +80,55 @@ export class JobsService {
     if (!job) {
       return;
     }
-    job.s3Key = payload.s3Key;
-    job.status = JobStatus.DONE;
-    job.resultText = null;
+    if (job.status === JobStatus.DONE || job.status === JobStatus.ERROR) {
+      this.logger.warn(
+        `Duplicate transcription result ignored for job ${job.id}; current status=${job.status}.`,
+      );
+      return;
+    }
+    const normalizedStatus =
+      payload.status?.toUpperCase() === JobStatus.ERROR
+        ? JobStatus.ERROR
+        : JobStatus.DONE;
+    job.status = normalizedStatus;
+    if (normalizedStatus === JobStatus.DONE && payload.s3Key) {
+      job.s3Key = payload.s3Key;
+    }
+    if (normalizedStatus === JobStatus.ERROR && payload.error) {
+      job.summary = payload.error.slice(0, 500);
+    }
     await this.jobsRepository.save(job);
     this.eventsGateway.emitStatusUpdate(job.userId, {
       jobId: job.id,
       status: job.status,
       s3Key: job.s3Key,
+    });
+  }
+
+  async applyTranscriptionProgressFromQueue(payload: {
+    jobId: string;
+    status: string;
+    progress?: number;
+    userId?: string;
+  }): Promise<void> {
+    const job = await this.jobsRepository.findOne({
+      where: { id: payload.jobId },
+    });
+    if (!job) {
+      return;
+    }
+    const normalizedStatus = payload.status.toUpperCase();
+    if (normalizedStatus === 'PROCESSING') {
+      job.status = JobStatus.PROCESSING;
+      await this.jobsRepository.save(job);
+    } else if (normalizedStatus === 'ERROR') {
+      job.status = JobStatus.ERROR;
+      await this.jobsRepository.save(job);
+    }
+    this.eventsGateway.emitStatusUpdate(payload.userId ?? job.userId, {
+      jobId: job.id,
+      status: job.status,
+      progress: payload.progress,
     });
   }
 
@@ -115,25 +160,5 @@ export class JobsService {
       return { presignedUrl, expiresInSeconds, text };
     }
     return { presignedUrl, expiresInSeconds };
-  }
-
-  async update(id: string, dto: UpdateJobDto): Promise<Job> {
-    const job = await this.jobsRepository.findOne({ where: { id } });
-    if (!job) {
-      throw new NotFoundException('Job not found');
-    }
-    if (dto.status !== undefined) {
-      job.status = dto.status;
-    }
-    if (dto.resultText !== undefined) {
-      job.resultText = dto.resultText;
-    }
-    if (dto.s3Key !== undefined) {
-      job.s3Key = dto.s3Key;
-    }
-    if (dto.summary !== undefined) {
-      job.summary = dto.summary;
-    }
-    return this.jobsRepository.save(job);
   }
 }
