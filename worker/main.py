@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import boto3
@@ -38,13 +39,25 @@ def parse_payload(body: bytes) -> dict:
     return obj
 
 
-def resolve_audio_path() -> Path | None:
+def resolve_audio_path(filename: str | None = None) -> Path | None:
+    if filename:
+        candidate = Path(__file__).resolve().parent / filename
+        if candidate.is_file():
+            logger.info("Using queued audio file: %s", candidate)
+            return candidate
+
     env_path = os.environ.get("TRANSCRIBE_AUDIO_PATH")
     if env_path:
         p = Path(env_path)
-        return p if p.is_file() else None
+        if p.is_file():
+            logger.info("Using TRANSCRIBE_AUDIO_PATH audio file: %s", p)
+            return p
+
     stub = Path(__file__).resolve().parent / "stub.mp3"
-    return stub if stub.is_file() else None
+    if stub.is_file():
+        logger.info("Using fallback stub audio file: %s", stub)
+        return stub
+    return None
 
 
 def get_s3_client():
@@ -175,13 +188,44 @@ def main() -> None:
                 return
 
             user_id = data.get("userId")
+            title = data.get("title")
             publish_progress(ch, user_id, job_id, 0, "PROCESSING")
             logger.info("Published PROCESSING for job %s", job_id)
 
             try:
-                audio = resolve_audio_path()
+                audio = resolve_audio_path(title)
                 if audio is not None:
-                    result = model.transcribe(str(audio))
+                    ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+                    if os.path.exists(ffmpeg_path):
+                        logger.info("Using local ffmpeg at: %s", ffmpeg_path)
+                        ffmpeg_dir = os.path.dirname(ffmpeg_path)
+                        path_parts = os.environ.get("PATH", "").split(os.pathsep)
+                        if ffmpeg_dir not in path_parts:
+                            os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + ffmpeg_dir
+
+                    try:
+                        result = model.transcribe(str(audio))
+                    except Exception as transcribe_exc:
+                        logger.exception("Whisper transcribe failed for file: %s", audio)
+                        ffmpeg_cmd = [ffmpeg_path, "-v", "error", "-i", str(audio), "-f", "null", "-"]
+                        if not os.path.exists(ffmpeg_path):
+                            ffmpeg_cmd[0] = "ffmpeg"
+                        try:
+                            probe = subprocess.run(
+                                ffmpeg_cmd,
+                                capture_output=True,
+                                text=True,
+                                timeout=30,
+                            )
+                            logger.error("ffmpeg return code: %s", probe.returncode)
+                            if probe.stderr:
+                                logger.error("ffmpeg stderr: %s", probe.stderr.strip())
+                            if probe.stdout:
+                                logger.error("ffmpeg stdout: %s", probe.stdout.strip())
+                        except Exception:
+                            logger.exception("Failed to capture ffmpeg stderr diagnostics")
+                        raise transcribe_exc
+
                     text = (result.get("text") or "").strip()
                 else:
                     text = (

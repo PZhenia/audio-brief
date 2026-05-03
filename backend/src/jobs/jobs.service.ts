@@ -52,7 +52,27 @@ export class JobsService {
   async findAllForUser(userId: string): Promise<Job[]> {
     return this.jobsRepository.find({
       where: { userId },
+      order: { createdAt: 'DESC' },
     });
+  }
+
+  async removeForUser(userId: string, id: string): Promise<void> {
+    const job = await this.jobsRepository.findOne({
+      where: { id, userId },
+    });
+    if (!job) {
+      throw new NotFoundException('Job not found');
+    }
+    if (job.s3Key) {
+      try {
+        await this.minioStorage.deleteObject(job.s3Key);
+      } catch (err) {
+        this.logger.warn(
+          `Could not delete MinIO object ${job.s3Key} for job ${job.id}: ${String(err)}`,
+        );
+      }
+    }
+    await this.jobsRepository.delete({ id: job.id, userId });
   }
 
   async findOneForUser(userId: string, id: string): Promise<Job> {

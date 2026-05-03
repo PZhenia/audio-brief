@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const defaultEndpoint = 'http://localhost:9000';
@@ -36,5 +36,11 @@ export class MinioStorageService {
   ): Promise<string> {
     const cmd = new GetObjectCommand({ Bucket: this.bucket, Key: key });
     return getSignedUrl(this.client, cmd, { expiresIn: expiresInSeconds });
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
   }
 }

@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -38,6 +41,13 @@ export class JobsController {
   ) {
     const inlineText = inline === 'true' || inline === '1';
     return this.jobsService.getResultForUser(userId, id, inlineText);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@UserId() userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.jobsService.removeForUser(userId, id);
   }
 
   @Get(':id')

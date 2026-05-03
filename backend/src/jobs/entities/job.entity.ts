@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 export enum JobStatus {
   CREATED = 'CREATED',
@@ -30,4 +30,7 @@ export class Job {
     default: JobStatus.CREATED,
   })
   status: JobStatus;
+
+  @CreateDateColumn({ type: 'datetime' })
+  createdAt: Date;
 }
