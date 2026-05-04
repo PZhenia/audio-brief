@@ -26,6 +26,7 @@ export class TranscriptionRmqPublisher implements OnModuleDestroy {
     jobId: string;
     title: string;
     userId: string;
+    audioS3Key: string;
   }): Promise<void> {
     const channel = await this.getChannel();
     const body = Buffer.from(

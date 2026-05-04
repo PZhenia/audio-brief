@@ -6,8 +6,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import type { Express } from 'express';
+import * as path from 'node:path';
 import { Repository } from 'typeorm';
-import { CreateJobDto } from './dto/create-job.dto';
 import { Job, JobStatus } from './entities/job.entity';
 import { EventsGateway } from '../events/events.gateway';
 import { MinioStorageService } from './minio-storage.service';
@@ -25,23 +26,65 @@ export class JobsService {
     private readonly eventsGateway: EventsGateway,
   ) {}
 
-  async create(userId: string, createJobDto: CreateJobDto): Promise<Job> {
+  async create(
+    userId: string,
+    file: Express.Multer.File,
+    titleOverride?: string,
+  ): Promise<Job> {
+    const mime = file.mimetype ?? '';
+    if (!mime.startsWith('audio/')) {
+      throw new BadRequestException(
+        'Only audio uploads are supported (MIME type must start with audio/).',
+      );
+    }
+    const rawTitle = titleOverride?.trim() || file.originalname || 'recording';
+    const jobTitle = rawTitle.slice(0, 2048);
+
     const createdJob = this.jobsRepository.create({
-      title: createJobDto.title,
+      title: jobTitle,
       userId,
       status: JobStatus.CREATED,
+      s3Key: null,
+      inputS3Key: null,
+      summary: null,
     });
     const savedJob = await this.jobsRepository.save(createdJob);
+
+    const ext = path.extname(file.originalname || '') || '.bin';
+    const inputKey = `audio-inputs/${savedJob.id}${ext}`;
+
+    try {
+      await this.minioStorage.putObject(inputKey, file.buffer, mime);
+    } catch (err) {
+      this.logger.error(
+        `MinIO upload failed for job ${savedJob.id}: ${String(err)}`,
+      );
+      await this.jobsRepository.delete({ id: savedJob.id });
+      throw new ServiceUnavailableException(
+        'Could not store audio. Check MinIO and try again.',
+      );
+    }
+
+    savedJob.inputS3Key = inputKey;
+    await this.jobsRepository.save(savedJob);
 
     try {
       await this.transcriptionPublisher.publishJobQueued({
         jobId: savedJob.id,
         title: savedJob.title,
         userId: savedJob.userId,
+        audioS3Key: inputKey,
       });
-    } catch {
+    } catch (err) {
+      this.logger.error(
+        `Queue publish failed for job ${savedJob.id}: ${String(err)}`,
+      );
+      try {
+        await this.minioStorage.deleteObject(inputKey);
+      } catch {}
+      await this.jobsRepository.delete({ id: savedJob.id });
       throw new ServiceUnavailableException(
-        'Job created, but queue is unavailable. Please retry later.',
+        'Job could not be queued. Please retry later.',
       );
     }
 
@@ -62,6 +105,15 @@ export class JobsService {
     });
     if (!job) {
       throw new NotFoundException('Job not found');
+    }
+    if (job.inputS3Key) {
+      try {
+        await this.minioStorage.deleteObject(job.inputS3Key);
+      } catch (err) {
+        this.logger.warn(
+          `Could not delete MinIO input object ${job.inputS3Key}: ${String(err)}`,
+        );
+      }
     }
     if (job.s3Key) {
       try {

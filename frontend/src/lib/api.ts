@@ -19,12 +19,15 @@ export async function fetchJobs(token: string) {
   return data
 }
 
-export async function createJob(token: string, title: string) {
-  const { data } = await api.post<Job>(
-    '/jobs',
-    { title },
-    { headers: { Authorization: `Bearer ${token}` } },
-  )
+export async function createJob(token: string, title: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  if (title.trim()) {
+    form.append('title', title.trim())
+  }
+  const { data } = await api.post<Job>('/jobs', form, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   return data
 }
 

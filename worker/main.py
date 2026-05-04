@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import boto3
@@ -37,6 +38,16 @@ def parse_payload(body: bytes) -> dict:
             )
         return obj["data"]
     return obj
+
+
+def download_input_audio_from_s3(client, bucket: str, key: str) -> Path:
+    suffix = Path(key).suffix or ".bin"
+    fd, raw_path = tempfile.mkstemp(prefix="job-audio-", suffix=suffix)
+    os.close(fd)
+    path = Path(raw_path)
+    logger.info("Downloading input audio s3://%s/%s -> %s", bucket, key, path)
+    client.download_file(bucket, key, str(path))
+    return path
 
 
 def resolve_audio_path(filename: str | None = None) -> Path | None:
@@ -189,11 +200,19 @@ def main() -> None:
 
             user_id = data.get("userId")
             title = data.get("title")
+            audio_s3_key = data.get("audioS3Key")
             publish_progress(ch, user_id, job_id, 0, "PROCESSING")
             logger.info("Published PROCESSING for job %s", job_id)
 
+            temp_download: Path | None = None
             try:
-                audio = resolve_audio_path(title)
+                if audio_s3_key:
+                    temp_download = download_input_audio_from_s3(
+                        s3, S3_BUCKET, audio_s3_key
+                    )
+                    audio = temp_download
+                else:
+                    audio = resolve_audio_path(title)
                 if audio is not None:
                     ffmpeg_path = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
                     if os.path.exists(ffmpeg_path):
@@ -229,8 +248,8 @@ def main() -> None:
                     text = (result.get("text") or "").strip()
                 else:
                     text = (
-                        "[stub] No audio file: set TRANSCRIBE_AUDIO_PATH to a valid .mp3 "
-                        "or add worker/stub.mp3 for local tests."
+                        "[stub] No audio: message had no audioS3Key and no local file "
+                        "(TRANSCRIBE_AUDIO_PATH / worker/stub.mp3)."
                     )
             except Exception as exc:
                 logger.exception("Transcription failed for job %s", job_id)
@@ -239,6 +258,12 @@ def main() -> None:
                     publish_progress(ch, user_id, job_id, 100, "ERROR")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
+            finally:
+                if temp_download is not None and temp_download.is_file():
+                    try:
+                        temp_download.unlink()
+                    except OSError:
+                        pass
 
             if user_id:
                 publish_progress(ch, user_id, job_id, 70, "PROCESSING")

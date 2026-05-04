@@ -5,6 +5,7 @@ export type Job = {
   title: string
   userId: string
   s3Key: string | null
+  inputS3Key?: string | null
   summary: string | null
   status: JobStatus
   createdAt?: string

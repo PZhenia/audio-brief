@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,12 +10,19 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserId } from '../auth/decorators/user-id.decorator';
-import { CreateJobDto } from './dto/create-job.dto';
+import { CreateJobFormDto } from './dto/create-job.dto';
 import { JobsService } from './jobs.service';
+
+const upload = memoryStorage();
+const maxAudioBytes = 200 * 1024 * 1024;
 
 @Controller('jobs')
 export class JobsController {
@@ -22,8 +30,21 @@ export class JobsController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  create(@UserId() userId: string, @Body() createJobDto: CreateJobDto) {
-    return this.jobsService.create(userId, createJobDto);
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: upload,
+      limits: { fileSize: maxAudioBytes },
+    }),
+  )
+  create(
+    @UserId() userId: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: CreateJobFormDto,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Audio file is required (field name: file).');
+    }
+    return this.jobsService.create(userId, file, body.title);
   }
 
   @Get()

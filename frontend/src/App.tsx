@@ -67,8 +67,8 @@ function App() {
   const [userId, setUserId] = useState(localStorage.getItem(USER_KEY) ?? '')
   const [token, setToken] = useState(localStorage.getItem(TOKEN_KEY) ?? '')
   const [loginValue, setLoginValue] = useState(userId || 'user-1')
-  const [titleValue, setTitleValue] = useState('')
   const [selectedFileName, setSelectedFileName] = useState('')
+  const [audioFile, setAudioFile] = useState<File | null>(null)
   const [jobs, setJobs] = useState<UiJob[]>([])
   const [wsConnected, setWsConnected] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -79,7 +79,7 @@ function App() {
   const [copyDone, setCopyDone] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  const fileReady = Boolean(selectedFileName && titleValue.trim())
+  const fileReady = Boolean(audioFile)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -161,11 +161,11 @@ function App() {
   }
 
   const handleCreateJob = async () => {
-    if (!token || !titleValue.trim()) return
+    if (!token || !audioFile) return
     setCreating(true)
     setError(null)
     try {
-      const created = await createJob(token, titleValue.trim())
+      const created = await createJob(token, audioFile.name, audioFile)
       setJobs((prev) => [
         {
           ...created,
@@ -173,7 +173,7 @@ function App() {
         },
         ...prev,
       ])
-      setTitleValue('')
+      setAudioFile(null)
       setSelectedFileName('')
     } catch {
       setError('Could not create transcription job.')
@@ -256,8 +256,8 @@ function App() {
 
   const attachFile = (file: File | null) => {
     if (!file) return
+    setAudioFile(file)
     setSelectedFileName(file.name)
-    setTitleValue(file.name)
   }
 
   const handleFilePicked = (file: File | null) => {
